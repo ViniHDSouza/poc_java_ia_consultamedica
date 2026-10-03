@@ -1,0 +1,193 @@
+{
+  "info": {
+    "_postman_id": "9da9a4dc-640f-4f7a-9a32-pocjavaia002",
+    "name": "poc_java_ia_consultamedica",
+    "description": "Collection didática do projeto Java 21 + Spring Boot + LangChain4j + LangGraph4j + OpenRouter + LangSmith. O endpoint /chat foi preservado do projeto JavaScript original.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Agendar consulta - sucesso",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Olá, sou Maria Santos e quero uma consulta com o Dr. Alicio da Silva amanhã às 16h para um check-up regular\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
+        }
+      }
+    },
+    {
+      "name": "02 - Horário ocupado - erro de negócio",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Meu nome é Carlos Souza. Quero uma consulta com o Dr. Alicio da Silva hoje às 11h para um check-up\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
+        }
+      }
+    },
+    {
+      "name": "03 - Criar consulta para depois cancelar",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Sou Joao da Silva e quero marcar uma consulta com a Dra. Ana Pereira hoje às 16h\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
+        }
+      }
+    },
+    {
+      "name": "04 - Cancelar a consulta criada no request 03",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Cancele minha consulta com a Dra. Ana Pereira que tenho hoje às 16h. Meu nome é Joao da Silva\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
+        }
+      }
+    },
+    {
+      "name": "05 - Cancelar consulta inexistente - erro",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Meu nome é Pedro Alves. Cancele minha consulta com a Dra. Carol Gomes amanhã às 10h\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
+        }
+      }
+    },
+    {
+      "name": "06 - Intenção desconhecida",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Qual é a previsão do tempo para amanhã na minha cidade?\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "chat"
+          ]
+        }
+      }
+    },
+    {
+      "name": "07 - Alias REST mais descritivo",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"question\": \"Meu nome é Ana Lima e quero uma consulta com a Dra. Carol Gomes amanhã às 17h\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/medical-appointments/chat",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "medical-appointments",
+            "chat"
+          ]
+        }
+      }
+    }
+  ]
+}

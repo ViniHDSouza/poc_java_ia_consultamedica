@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: poc_java_ia_consultamedica
+  config:
+    # Permite usar um arquivo .env simples (KEY=value) na raiz.
+    import: optional:file:.env[.properties]
+
+server:
+  port: 3000
+
+openrouter:
+  api-key: ${OPENROUTER_API_KEY:}
+  base-url: ${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}
+  model: ${OPENROUTER_MODEL:arcee-ai/trinity-large-preview:free}
+  http-referer: ${OPENROUTER_HTTP_REFERER:http://localhost:3000}
+  x-title: ${OPENROUTER_X_TITLE:poc_java_ia_consultamedica}
+  temperature: ${OPENROUTER_TEMPERATURE:0.7}
+  timeout-seconds: ${OPENROUTER_TIMEOUT_SECONDS:60}
+
+langsmith:
+  api-key: ${LANGSMITH_API_KEY:}
+  # Mantém compatibilidade com LANGCHAIN_TRACING_V2, usado no projeto original.
+  tracing: ${LANGSMITH_TRACING:${LANGCHAIN_TRACING_V2:false}}
+  # Mantém compatibilidade com LANGCHAIN_PROJECT, usado no projeto original.
+  project: ${LANGSMITH_PROJECT:${LANGCHAIN_PROJECT:poc-java-ia-consultamedica}}
+  endpoint: ${LANGSMITH_ENDPOINT:https://api.smith.langchain.com}
+  include-llm-payloads: ${LANGSMITH_INCLUDE_LLM_PAYLOADS:true}
+
+logging:
+  level:
+    root: INFO
+    br.com.vinicius.pocjavaiaconsultamedica: INFO
