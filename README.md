@@ -1,44 +1,130 @@
 # poc_java_ia_consultamedica
 
-POC didática em **Java 21 + Spring Boot** para aprender, passo a passo, como uma aplicação Java pode usar IA para **entender linguagem natural**, transformar essa informação em **dados estruturados** e executar uma regra de negócio previsível.
+> **Java 21 + Spring Boot + LangChain4j + LangGraph4j + OpenRouter + LangSmith**
 
-O domínio escolhido é simples: **agendar e cancelar consultas médicas fictícias**.
+Projeto educacional que demonstra como transformar **linguagem natural** em uma ação de negócio controlada: o usuário escreve que deseja agendar ou cancelar uma consulta, a IA extrai a intenção e os dados em formato estruturado, o LangGraph4j decide o fluxo e o Java executa a regra.
 
-> **Este é um projeto de estudo. Não use dados médicos reais.**
-
----
-
-# 1. O que você deve aprender ao terminar este README
-
-Não quero que você apenas consiga executar o projeto.
-
-O objetivo é que, depois de estudar este material, você consiga explicar com suas próprias palavras:
-
-1. o que é uma LLM;
-2. o que é um prompt;
-3. a diferença entre `SystemMessage` e `UserMessage`;
-4. por que usamos Structured Output;
-5. o que é JSON Schema;
-6. para que serve o LangChain4j;
-7. para que serve o OpenRouter;
-8. o que é um State;
-9. o que é um Node;
-10. o que é uma Edge;
-11. o que é uma Conditional Edge;
-12. como o LangGraph4j controla o workflow;
-13. por que a IA não deve executar diretamente a regra de negócio;
-14. para que servem LangGraph4j Studio, LangSmith e OpenTelemetry;
-15. como construir outro projeto usando a mesma arquitetura.
-
-Se você conseguir responder esses 15 itens sem consultar o README, o projeto cumpriu seu objetivo didático.
+> **Importante:** este é um projeto de estudo com dados fictícios. Não use informações médicas reais.
 
 ---
 
-# 2. O problema que estamos resolvendo
+## Como usar este README
 
-Um sistema Java trabalha melhor com dados conhecidos.
+Este documento tem **dupla função**.
 
-Por exemplo:
+### Se você quer avaliar ou executar o projeto
+
+Leia nesta ordem:
+
+1. [Visão geral](#1-visão-geral)
+2. [Arquitetura](#3-arquitetura)
+3. [Como executar](#11-como-executar)
+4. [API REST](#12-api-rest)
+5. [Testes](#14-testes)
+6. [Observabilidade](#15-observabilidade)
+7. [Limitações](#18-limitações-e-próximos-passos)
+
+### Se você está aprendendo IA aplicada a software
+
+Leia do início ao fim.
+
+As seções explicam:
+
+```text
+problema
+  ↓
+conceitos de IA
+  ↓
+Structured Output
+  ↓
+State / Nodes / Edges
+  ↓
+fluxo real da requisição
+  ↓
+código Java
+  ↓
+testes
+  ↓
+como reproduzir em outro domínio
+```
+
+---
+
+## Projeto em uma página
+
+| Item | Informação |
+|---|---|
+| **Objetivo** | demonstrar IA aplicada a um workflow Java controlado |
+| **Domínio** | agendamento/cancelamento de consultas fictícias |
+| **Entrada** | linguagem natural |
+| **Saída da IA** | JSON estruturado |
+| **Workflow** | LangGraph4j |
+| **Modelo** | acessado via OpenRouter |
+| **Persistência** | memória |
+| **Observabilidade** | LangSmith + OpenTelemetry |
+| **Endpoint principal** | `POST /chat` |
+| **Perfil do projeto** | POC educacional, não produção |
+
+### O que é regra de negócio e o que é IA?
+
+```text
+IA:
+- entender a frase;
+- extrair dados;
+- gerar mensagem amigável.
+
+Java:
+- validar pré-condições;
+- verificar profissional;
+- verificar conflito;
+- agendar;
+- cancelar;
+- persistir.
+```
+
+> **Decisão de engenharia:** o modelo não recebe autoridade para alterar o estado de negócio diretamente. Ele interpreta a entrada; o Java decide e executa a operação.
+
+---
+
+## Quick start — para ver o projeto funcionando primeiro
+
+Se você quer executar antes de estudar todos os conceitos:
+
+```bash
+# 1. configure
+cp .env.example .env
+
+# 2. informe OPENROUTER_API_KEY no .env
+
+# 3. testes locais
+mvn clean test
+
+# 4. suba a aplicação
+mvn spring-boot:run
+```
+
+Teste:
+
+```bash
+curl --request POST \
+  --url http://localhost:3000/chat \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "question": "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h"
+  }'
+```
+
+> **Para quem está começando:** não tente entender LangSmith, OpenTelemetry e Studio antes de entender `State → Node → Edge → Service`. Observabilidade vem depois do fluxo principal.
+
+---
+
+# 1. Visão geral
+
+## O problema
+
+Aplicações Java trabalham melhor com dados bem definidos.
+
+Exemplo:
 
 ```java
 long professionalId = 1L;
@@ -46,202 +132,349 @@ String patientName = "Maria Santos";
 Instant dateTime = ...;
 ```
 
-Mas pessoas não conversam assim.
-
-Uma pessoa escreve:
+Pessoas, porém, falam de forma livre:
 
 ```text
 Olá, meu nome é Maria Santos.
 Quero marcar uma consulta com o Dr. Alicio amanhã às 16h
-porque preciso fazer um check-up.
+para fazer um check-up.
 ```
 
-O Java não sabe naturalmente que:
+Antes de executar qualquer regra, o sistema precisa descobrir:
 
 ```text
-"marcar uma consulta" = intenção de agendar
-"Dr. Alicio"          = professionalId 1
-"amanhã às 16h"       = uma data/hora
-"Maria Santos"        = nome do paciente
-"check-up"            = motivo
+qual é a intenção?
+qual profissional foi citado?
+qual data e horário?
+qual paciente?
+qual motivo?
 ```
 
-É aqui que a IA entra.
+A IA é usada para fazer essa **interpretação**.
 
-Ela faz a ponte entre:
-
-```text
-LINGUAGEM HUMANA
-       ↓
-      IA
-       ↓
-DADOS ESTRUTURADOS
-```
-
-Depois dessa etapa, o restante pode continuar sendo Java tradicional.
+Depois disso, a regra volta a ser Java tradicional.
 
 ---
 
-# 3. A ideia principal do projeto
+## O que o projeto faz
 
-O projeto **não usa IA para tudo**.
+O sistema reconhece três intenções:
 
-Ele divide responsabilidades.
+| Intent | Significado |
+|---|---|
+| `schedule` | agendar consulta |
+| `cancel` | cancelar consulta |
+| `unknown` | assunto fora do domínio |
+
+Exemplo de entrada:
 
 ```text
-Pessoa escreve uma frase
-          ↓
-IA interpreta a frase
-          ↓
+Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h.
+```
+
+Exemplo de informação estruturada:
+
+```json
+{
+  "intent": "schedule",
+  "professionalId": 1,
+  "professionalName": "Dr. Alicio da Silva",
+  "datetime": "2026-10-05T16:00:00Z",
+  "patientName": "Maria Santos",
+  "reason": null
+}
+```
+
+A IA **não grava a consulta**.
+
+Quem faz isso é o código Java.
+
+---
+
+## Princípio arquitetural
+
+A ideia mais importante do projeto é:
+
+> **IA interpreta dados flexíveis; Java controla regras determinísticas.**
+
+```text
+Linguagem natural
+       ↓
+      LLM
+       ↓
 Structured Output
-          ↓
-Dados entram no State
-          ↓
-LangGraph4j escolhe o fluxo
-          ↓
-Java executa a regra de negócio
-          ↓
-Resultado volta para o State
-          ↓
-IA gera uma mensagem amigável
-          ↓
-Resposta HTTP
+       ↓
+LangGraph4j State
+       ↓
+Roteamento
+       ↓
+Service Java
+       ↓
+Resultado
+       ↓
+Mensagem para o usuário
 ```
-
-A frase mais importante deste projeto é:
-
-> **A IA interpreta o que é flexível; o Java controla o que precisa ser determinístico.**
 
 ---
 
-# 4. Antes de continuar: 8 conceitos básicos
+# 2. Tecnologias e responsabilidades
+
+| Tecnologia | Responsabilidade |
+|---|---|
+| **Java 21** | linguagem principal |
+| **Spring Boot** | API REST e configuração da aplicação |
+| **Bean Validation** | validação da entrada HTTP |
+| **LangChain4j** | integração Java com o modelo de linguagem |
+| **OpenRouter** | gateway de acesso ao modelo |
+| **Structured Output / JSON Schema** | define o formato esperado da saída da IA |
+| **Jackson** | converte JSON em objetos Java |
+| **LangGraph4j** | modela o workflow em State, Nodes e Edges |
+| **LangGraph4j Studio** | visualiza e executa o grafo localmente |
+| **LangSmith** | observabilidade e tracing |
+| **OpenTelemetry** | instrumentação e envio dos traces |
+| **JUnit** | testes automatizados |
+| **Postman** | testes manuais da API |
+
+### Regra de memorização
+
+```text
+Spring       → recebe a requisição
+LangChain4j  → conversa com a IA
+OpenRouter   → fornece acesso ao modelo
+LangGraph4j  → controla o fluxo
+Service Java → executa a regra
+LangSmith    → ajuda a observar a execução
+```
+
+---
+
+# 3. Arquitetura
+
+## Visão de componentes
+
+```mermaid
+flowchart TD
+    U[Usuário] --> API[POST /chat]
+    API --> CTRL[MedicalAppointmentChatController]
+    CTRL --> EXEC[MedicalAppointmentGraphExecutor]
+    EXEC --> GRAPH[LangGraph4j]
+
+    GRAPH --> IDENTIFY[IdentifyPatientAppointmentIntentNode]
+    IDENTIFY --> INTERPRETER[OpenRouterPatientRequestInterpreter]
+    INTERPRETER --> CLIENT[OpenRouterStructuredOutputClient]
+    CLIENT --> LC4J[LangChain4j]
+    LC4J --> OR[OpenRouter / LLM]
+    OR --> STRUCTURED[Structured Output]
+
+    STRUCTURED --> ROUTE{intent}
+
+    ROUTE -->|schedule| SCHEDULE[ScheduleMedicalAppointmentNode]
+    ROUTE -->|cancel| CANCEL[CancelMedicalAppointmentNode]
+    ROUTE -->|unknown| MESSAGE[GeneratePatientResponseNode]
+
+    SCHEDULE --> SERVICE[MedicalAppointmentService]
+    CANCEL --> SERVICE
+
+    SERVICE --> REPO[InMemoryMedicalAppointmentRepository]
+    SCHEDULE --> MESSAGE
+    CANCEL --> MESSAGE
+
+    MESSAGE --> RESPONSE_AI[OpenRouterPatientResponseGenerator]
+    RESPONSE_AI --> OR2[OpenRouter / LLM]
+    OR2 --> HTTP[Resposta HTTP]
+```
+
+---
+
+## Fluxo do grafo
+
+```text
+START
+  ↓
+identifyIntent
+  ↓
+  ├── schedule → schedule ─┐
+  ├── cancel   → cancel ───┼→ message → END
+  └── unknown ─────────────┘
+```
+
+Esse desenho é simples de propósito. O objetivo é enxergar claramente:
+
+```text
+entrada
+  ↓
+interpretação
+  ↓
+decisão
+  ↓
+ação
+  ↓
+resposta
+```
+
+
+## Sequência de uma chamada
+
+```mermaid
+sequenceDiagram
+    participant U as Usuário
+    participant C as Controller
+    participant G as LangGraph4j
+    participant I as IdentifyIntent
+    participant L as LangChain4j/OpenRouter
+    participant S as Service
+    participant M as MessageNode
+
+    U->>C: POST /chat
+    C->>G: question
+    G->>I: State
+    I->>L: prompt + JSON Schema
+    L-->>I: Structured Output
+    I-->>G: State atualizado
+    G->>S: schedule/cancel
+    S-->>G: resultado da ação
+    G->>M: State
+    M->>L: gerar mensagem
+    L-->>M: message
+    M-->>G: State final
+    G-->>C: resultado
+    C-->>U: HTTP 200 + JSON
+```
+
+> **Aprendizado:** o LLM participa do começo e do fim; a alteração de negócio acontece no meio, em código Java comum.
+
+---
+
+# 4. Conceitos de IA que o projeto ensina
 
 ## 4.1 LLM
 
 LLM significa **Large Language Model**.
 
-Neste projeto, ela recebe texto e ajuda a extrair significado.
+Neste projeto, ela é usada principalmente como um interpretador de linguagem.
 
-Exemplo:
+Entrada:
 
 ```text
-Quero cancelar a consulta que tenho amanhã às 14h com a Dra. Ana.
+Quero cancelar minha consulta com a Dra. Ana amanhã às 14h.
 Meu nome é João.
 ```
 
-A LLM pode transformar isso em:
+Saída desejada:
 
 ```json
 {
   "intent": "cancel",
   "professionalId": 2,
   "professionalName": "Dra. Ana Pereira",
-  "datetime": "2026-10-04T14:00:00Z",
+  "datetime": "2026-10-05T14:00:00Z",
   "patientName": "João"
 }
 ```
 
 A LLM não é:
 
-- banco de dados;
-- controller;
-- regra de negócio;
-- repositório.
+```text
+banco de dados
+repository
+controller
+service
+regra de negócio
+```
 
-Neste projeto ela é principalmente um **interpretador de linguagem**.
+Ela ajuda a transformar uma entrada ambígua em dados que o software entende.
 
 ---
 
 ## 4.2 Prompt
 
-Prompt é a informação enviada ao modelo.
+Prompt é o conjunto de instruções e contexto enviados ao modelo.
 
-Um prompt pode explicar:
+Neste projeto, prompts não ficam espalhados aleatoriamente em Strings.
 
-```text
-quem o modelo deve ser;
-qual tarefa deve executar;
-quais regras deve seguir;
-quais dados estão disponíveis;
-qual formato de resposta esperamos.
-```
-
-Neste projeto existem classes específicas para montar prompts:
+Eles são construídos por classes específicas:
 
 ```text
 MedicalAppointmentIntentPromptBuilder
 PatientResponsePromptBuilder
 ```
 
-Isso é melhor do que espalhar Strings gigantes pelo código.
+O prompt de intenção informa, por exemplo:
+
+```text
+papel do modelo
+tarefa
+data atual
+profissionais disponíveis
+intents permitidas
+regras de extração
+exemplos
+```
 
 ---
 
-## 4.3 System Message
+## 4.3 System Message e User Message
 
-A `SystemMessage` fornece o contexto e as regras principais.
+### System Message
+
+Define as regras gerais.
 
 Exemplo conceitual:
 
 ```text
-Você é um classificador de intenções.
-As intenções permitidas são:
-- schedule
-- cancel
-- unknown
-
-Estes são os profissionais disponíveis...
+Você é um classificador de intenções para consultas.
+Identifique schedule, cancel ou unknown.
+Use apenas os profissionais fornecidos.
 ```
 
-Ela define **como o modelo deve trabalhar**.
+### User Message
 
----
-
-## 4.4 User Message
-
-A `UserMessage` contém a entrada que deve ser processada.
-
-Exemplo:
+Contém o dado a ser analisado.
 
 ```text
-Meu nome é Maria e quero uma consulta amanhã às 16h.
+Quero marcar com o Dr. Alicio amanhã às 16h.
 ```
 
-Resumindo:
+Pense assim:
 
 ```text
-SystemMessage → regras da tarefa
-UserMessage   → dado que será analisado
+SystemMessage → "como trabalhar"
+UserMessage   → "o que analisar"
 ```
 
 ---
 
-## 4.5 Structured Output
+# 5. Structured Output e JSON Schema
 
-Structured Output significa pedir ao modelo uma resposta com **estrutura definida**.
+## O problema de pedir apenas "responda em JSON"
 
-Não queremos:
+Imagine este prompt:
 
 ```text
-Claro! Eu entendi que Maria quer marcar uma consulta...
+Extraia os dados e responda em JSON.
 ```
 
-Queremos algo que o Java consiga transformar em objeto:
+O modelo poderia responder:
 
-```json
+```text
+Claro! Os dados encontrados são:
+
 {
-  "intent": "schedule",
-  "patientName": "Maria"
+  "intent": "schedule"
 }
 ```
 
-A documentação atual do LangChain4j recomenda JSON Schema como a opção mais confiável entre as formas de obter saída estruturada quando o provider/modelo suporta esse recurso.
+Para uma pessoa, isso é legível.
+
+Para uma aplicação que esperava **somente JSON**, é um problema.
 
 ---
 
-## 4.6 JSON Schema
+## A solução
 
-JSON Schema descreve **como o JSON deve ser**.
+O projeto utiliza **Structured Output** com JSON Schema.
+
+O schema define formalmente o formato esperado.
 
 Exemplo simplificado:
 
@@ -256,901 +489,48 @@ Exemplo simplificado:
       "type": "string"
     }
   },
-  "required": ["intent"]
+  "required": ["intent"],
+  "additionalProperties": false
 }
 ```
 
-Isso diz:
+Fluxo técnico:
 
 ```text
-intent:
-  deve existir
-  e só pode ser schedule, cancel ou unknown
-
-patientName:
-  deve ser String, se informado
-```
-
-No projeto, os schemas ficam em:
-
-```text
-MedicalAppointmentStructuredOutputSchemas
-```
-
----
-
-## 4.7 Workflow
-
-Workflow é o **caminho da aplicação**.
-
-Exemplo:
-
-```text
-identificar intenção
-       ↓
-   é schedule?
-       ↓
-   agendar
-       ↓
-gerar mensagem
-```
-
-ou:
-
-```text
-identificar intenção
-       ↓
-    é cancel?
-       ↓
-   cancelar
-       ↓
-gerar mensagem
-```
-
-O LangGraph4j foi usado para deixar esse fluxo explícito.
-
----
-
-## 4.8 Observabilidade
-
-Observabilidade ajuda a responder perguntas como:
-
-```text
-Qual Node executou?
-Qual caminho o grafo escolheu?
-Quanto tempo a chamada à IA demorou?
-Qual erro aconteceu?
-Qual modelo respondeu?
-```
-
-Neste projeto:
-
-```text
-LangGraph4j Studio → visualiza o grafo localmente
-LangSmith          → analisa traces
-OpenTelemetry      → transporta os spans/traces
-```
-
----
-
-# 5. Mapa mental das tecnologias
-
-| Tecnologia | Responsabilidade |
-|---|---|
-| Java 21 | linguagem principal |
-| Spring Boot | aplicação e API REST |
-| Bean Validation | valida entrada HTTP |
-| LangChain4j | comunicação Java ↔ LLM |
-| OpenRouter | acesso ao modelo |
-| Jackson | JSON ↔ objetos Java |
-| LangGraph4j | workflow baseado em State, Nodes e Edges |
-| LangGraph4j Studio | inspeção visual do grafo |
-| LangSmith | observabilidade |
-| OpenTelemetry | criação/exportação de traces |
-| JUnit | testes |
-| Postman | chamadas manuais à API |
-
-Uma forma curta de memorizar:
-
-```text
-Spring       → recebe a requisição
-LangChain4j  → fala com a IA
-OpenRouter   → entrega acesso ao modelo
-LangGraph4j  → organiza o caminho
-Java Service → executa a regra
-LangSmith    → mostra o que aconteceu
-```
-
----
-
-# 6. Visão arquitetural
-
-```mermaid
-flowchart TD
-    A[Usuário] --> B[POST /chat]
-    B --> C[MedicalAppointmentChatController]
-    C --> D[MedicalAppointmentGraphExecutor]
-    D --> E[LangGraph4j]
-
-    E --> F[IdentifyPatientAppointmentIntentNode]
-    F --> G[OpenRouterPatientRequestInterpreter]
-    G --> H[OpenRouterStructuredOutputClient]
-    H --> I[LangChain4j]
-    I --> J[OpenRouter / LLM]
-    J --> K[Structured JSON]
-
-    K --> L{intent}
-
-    L -->|schedule| M[ScheduleMedicalAppointmentNode]
-    L -->|cancel| N[CancelMedicalAppointmentNode]
-    L -->|unknown| O[GeneratePatientResponseNode]
-
-    M --> P[MedicalAppointmentService]
-    N --> P
-
-    P --> O
-    O --> Q[OpenRouterPatientResponseGenerator]
-    Q --> R[OpenRouter / LLM]
-    R --> S[Resposta HTTP]
-```
-
-Observe que existem **duas chamadas à IA** no fluxo normal de schedule/cancel:
-
-```text
-1ª chamada → entender a intenção
-2ª chamada → gerar a mensagem amigável
-```
-
-A operação de agendar/cancelar fica no meio e é executada por Java.
-
----
-
-# 7. O coração do projeto: o State
-
-A documentação do LangGraph4j define `AgentState` como o estado compartilhado do grafo: cada Node recebe o State atual e devolve atualizações para ele.
-
-Neste projeto:
-
-```text
-MedicalAppointmentGraphState
-```
-
-é a classe que representa esse estado.
-
-## 7.1 Pense no State como uma mochila
-
-No início da viagem:
-
-```json
-{
-  "messages": [
-    "Meu nome é Maria e quero uma consulta amanhã às 16h."
-  ]
-}
-```
-
-O primeiro Node coloca novas informações na mochila:
-
-```json
-{
-  "messages": [
-    "Meu nome é Maria e quero uma consulta amanhã às 16h."
-  ],
-  "intent": "schedule",
-  "professionalId": 1,
-  "professionalName": "Dr. Alicio da Silva",
-  "datetime": "2026-10-04T16:00:00Z",
-  "patientName": "Maria"
-}
-```
-
-O Node de agendamento adiciona:
-
-```json
-{
-  "...": "...",
-  "actionSuccess": true,
-  "appointmentData": {
-    "professionalId": 1,
-    "patientName": "Maria",
-    "dateTime": "2026-10-04T16:00:00Z"
-  }
-}
-```
-
-O último Node adiciona a mensagem final:
-
-```json
-{
-  "messages": [
-    "Meu nome é Maria e quero uma consulta amanhã às 16h.",
-    "Sua consulta foi agendada com sucesso."
-  ],
-  "...": "..."
-}
-```
-
-## 7.2 Por que isso é útil?
-
-Porque os Nodes não precisam passar dezenas de parâmetros diretamente uns para os outros.
-
-Eles compartilham um contexto comum:
-
-```text
-Node A
- ↓
-State
- ↓
-Node B
- ↓
-State
- ↓
-Node C
-```
-
----
-
-# 8. Nodes: cada etapa tem uma responsabilidade
-
-A documentação do LangGraph4j descreve Nodes como os blocos que recebem o State, executam uma ação e devolvem atualizações do State.
-
-Neste projeto existem quatro Nodes principais.
-
----
-
-## 8.1 IdentifyPatientAppointmentIntentNode
-
-Objetivo:
-
-> descobrir o que o paciente quer e extrair os dados da frase.
-
-Entrada:
-
-```text
-state.messages[0]
-```
-
-Exemplo:
-
-```text
-"Quero marcar com o Dr. Alicio amanhã às 16h. Meu nome é Maria."
-```
-
-O Node chama:
-
-```text
-PatientRequestInterpreter
-```
-
-Implementação real:
-
-```text
-OpenRouterPatientRequestInterpreter
-```
-
-Resultado esperado:
-
-```json
-{
-  "intent": "schedule",
-  "professionalId": 1,
-  "professionalName": "Dr. Alicio da Silva",
-  "datetime": "...",
-  "patientName": "Maria"
-}
-```
-
-O Node então copia essas informações para o State.
-
-### O que aprender aqui?
-
-Esse Node mostra a fronteira:
-
-```text
-texto não estruturado
-        ↓
-       IA
-        ↓
-dados estruturados
-```
-
----
-
-## 8.2 ScheduleMedicalAppointmentNode
-
-Executado quando:
-
-```text
-intent = schedule
-```
-
-Antes de agendar:
-
-```text
-MedicalAppointmentActionStateValidator
-```
-
-confere se existem:
-
-```text
-professionalId
-datetime
-patientName
-```
-
-Depois chama:
-
-```text
-MedicalAppointmentService.scheduleMedicalAppointment(...)
-```
-
-### O que aprender aqui?
-
-A IA já terminou seu trabalho de interpretação.
-
-A partir daqui:
-
-```text
-Instant.parse(...)
-if (horário ocupado)
-repository.save(...)
-```
-
-é Java normal.
-
----
-
-## 8.3 CancelMedicalAppointmentNode
-
-Executado quando:
-
-```text
-intent = cancel
-```
-
-Ele:
-
-```text
-valida os campos
-      ↓
-converte datetime
-      ↓
-chama MedicalAppointmentService
-      ↓
-procura a consulta
-      ↓
-remove se encontrar
-```
-
-Novamente, a IA não cancela diretamente.
-
----
-
-## 8.4 GeneratePatientResponseNode
-
-Esse é o Node final.
-
-Ele pega um State técnico:
-
-```json
-{
-  "intent": "schedule",
-  "actionSuccess": false,
-  "actionError": "Horário indisponível"
-}
-```
-
-e solicita uma mensagem adequada.
-
-Exemplo:
-
-```text
-Não foi possível realizar o agendamento porque esse horário está indisponível.
-```
-
-Se essa chamada à IA falhar, existe um **fallback determinístico** em Java.
-
-Isso significa:
-
-```text
-IA falhou
-   ↓
-Java ainda consegue devolver uma mensagem básica
-```
-
----
-
-# 9. Edges e Conditional Edges
-
-## 9.1 Edge normal
-
-Uma Edge normal significa:
-
-> depois desse Node, sempre vá para aquele Node.
-
-Exemplo:
-
-```text
-schedule → message
-cancel   → message
-message  → END
-```
-
----
-
-## 9.2 Conditional Edge
-
-Uma Conditional Edge escolhe o próximo destino dinamicamente.
-
-No projeto:
-
-```text
-RoutePatientRequestByIntent
-```
-
-analisa:
-
-```text
-state.intent
-```
-
-e decide:
-
-```text
-schedule → schedule
-cancel   → cancel
-unknown  → message
-```
-
-Visualmente:
-
-```text
-                 ┌─ schedule ─┐
-identifyIntent ──┼─ cancel ───┼→ message → END
-                 └─ unknown ──┘
-```
-
-A documentação oficial do LangGraph4j destaca exatamente esse uso: Conditional Edges são usadas quando o próximo Node depende do State atual.
-
----
-
-# 10. Como o grafo é montado
-
-Classe:
-
-```text
-MedicalAppointmentGraphConfiguration
-```
-
-Ela define:
-
-```text
-Nodes
-Edges
-Conditional Edges
-START
-END
-```
-
-Conceitualmente:
-
-```java
-addNode("identifyIntent", ...)
-addNode("schedule", ...)
-addNode("cancel", ...)
-addNode("message", ...)
-
-addEdge(START, "identifyIntent")
-
-addConditionalEdges(
-    "identifyIntent",
-    ...
-)
-
-addEdge("schedule", "message")
-addEdge("cancel", "message")
-addEdge("message", END)
-```
-
-Depois o `StateGraph` é compilado para virar um grafo executável.
-
-Segundo a documentação do LangGraph4j, a compilação transforma a definição em um `CompiledGraph`, que pode então ser invocado.
-
----
-
-# 11. Raio-X de uma requisição completa
-
-Agora vamos acompanhar uma requisição real conceitualmente.
-
-Entrada:
-
-```json
-{
-  "question": "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio da Silva amanhã às 16h para um check-up"
-}
-```
-
----
-
-## Passo 1 — Controller
-
-Classe:
-
-```text
-MedicalAppointmentChatController
-```
-
-Responsabilidade:
-
-```text
-receber HTTP
-validar request
-chamar o executor
-devolver response
-```
-
-Ele não sabe detalhes de IA.
-
-Isso é proposital.
-
----
-
-## Passo 2 — Executor cria a entrada do grafo
-
-Classe:
-
-```text
-MedicalAppointmentGraphExecutor
-```
-
-Ele transforma a pergunta em:
-
-```json
-{
-  "messages": [
-    "Meu nome é Maria Santos e quero uma consulta..."
-  ]
-}
-```
-
-Depois invoca o `CompiledGraph`.
-
----
-
-## Passo 3 — identifyIntent é executado
-
-O primeiro Node lê:
-
-```text
-state.patientQuestion()
-```
-
-que corresponde à primeira mensagem.
-
-Ele chama:
-
-```text
-OpenRouterPatientRequestInterpreter
-```
-
----
-
-## Passo 4 — o prompt é montado
-
-Classe:
-
-```text
-MedicalAppointmentIntentPromptBuilder
-```
-
-O prompt possui informações como:
-
-```text
-papel do modelo
-profissionais disponíveis
-data atual
-regras de schedule/cancel/unknown
-instruções de extração
-exemplos
-```
-
-Isso reduz ambiguidade.
-
----
-
-## Passo 5 — o JSON Schema é escolhido
-
-Classe:
-
-```text
-MedicalAppointmentStructuredOutputSchemas
-```
-
-O schema da intenção define campos como:
-
-```text
-intent
-professionalId
-professionalName
-datetime
-patientName
-reason
-```
-
-E restringe:
-
-```text
-intent ∈ [schedule, cancel, unknown]
-```
-
----
-
-## Passo 6 — LangChain4j cria ChatRequest
-
-Classe:
-
-```text
-OpenRouterStructuredOutputClient
-```
-
-Ela combina:
-
-```text
+ChatRequest
+   +
 SystemMessage
-+
+   +
 UserMessage
-+
+   +
 ResponseFormat
-+
+   +
 JsonSchema
+       ↓
+   OpenRouter
+       ↓
+Structured JSON
+       ↓
+  ObjectMapper
+       ↓
+  record Java
 ```
 
-e chama:
+Classes principais:
 
-```java
-chatModel.chat(request)
+```text
+MedicalAppointmentStructuredOutputSchemas
+OpenRouterStructuredOutputClient
+ExtractedMedicalAppointmentIntent
 ```
 
-A documentação oficial do LangChain4j mostra exatamente esse padrão para Structured Output com `ChatModel`: `ResponseFormat` + `JsonSchema`.
+A documentação do LangChain4j trata JSON Schema como a opção mais confiável entre os mecanismos de saída estruturada quando o modelo/provider oferece suporte. O OpenRouter também permite `response_format` com `json_schema` em endpoints compatíveis.
 
 ---
 
-## Passo 7 — OpenRouter encaminha ao modelo
+## Structured Output não substitui validação de negócio
 
-A configuração está em:
-
-```text
-AiClientConfiguration
-```
-
-O `OpenAiChatModel` é usado com:
-
-```text
-baseUrl = OpenRouter
-modelName = modelo configurado
-```
-
-Apesar do nome `OpenAiChatModel`, aqui ele usa a API compatível com OpenAI oferecida pelo OpenRouter.
-
-O OpenRouter documenta que Structured Outputs usam:
-
-```text
-response_format
-type = json_schema
-```
-
-e recomenda `require_parameters=true` para rotear apenas a endpoints que aceitem os parâmetros solicitados.
-
-É por isso que o projeto configura essa preferência.
-
----
-
-## Passo 8 — JSON vira record Java
-
-Imagine que a IA devolva:
-
-```json
-{
-  "intent": "schedule",
-  "professionalId": 1,
-  "professionalName": "Dr. Alicio da Silva",
-  "datetime": "2026-10-04T16:00:00Z",
-  "patientName": "Maria Santos",
-  "reason": "check-up"
-}
-```
-
-O projeto usa Jackson:
-
-```java
-objectMapper.readValue(
-    responseJson,
-    ExtractedMedicalAppointmentIntent.class
-)
-```
-
-Agora não temos apenas uma String.
-
-Temos um objeto Java tipado.
-
----
-
-## Passo 9 — State é atualizado
-
-`IdentifyPatientAppointmentIntentNode` devolve um `Map` contendo as atualizações.
-
-O State passa a ter:
-
-```text
-intent = schedule
-professionalId = 1
-patientName = Maria Santos
-...
-```
-
----
-
-## Passo 10 — Conditional Edge decide o caminho
-
-`RoutePatientRequestByIntent` lê:
-
-```text
-schedule
-```
-
-e retorna:
-
-```text
-schedule
-```
-
-Então o próximo Node é:
-
-```text
-ScheduleMedicalAppointmentNode
-```
-
----
-
-## Passo 11 — validação secundária
-
-Antes da regra:
-
-```text
-MedicalAppointmentActionStateValidator
-```
-
-confere os campos.
-
-Essa é a regra mental:
-
-> **Structured Output garante formato; a aplicação ainda garante a regra de negócio.**
-
----
-
-## Passo 12 — Java agenda
-
-`MedicalAppointmentService`:
-
-```text
-1. verifica se o profissional existe;
-2. verifica se o horário está livre;
-3. cria MedicalAppointment;
-4. salva no repository.
-```
-
-A IA não participa dessa lógica.
-
----
-
-## Passo 13 — resultado volta ao State
-
-Exemplo:
-
-```json
-{
-  "actionSuccess": true,
-  "appointmentData": {
-    "professionalId": 1,
-    "patientName": "Maria Santos",
-    "reason": "check-up"
-  }
-}
-```
-
----
-
-## Passo 14 — geração da mensagem
-
-O fluxo segue automaticamente:
-
-```text
-schedule → message
-```
-
-`GeneratePatientResponseNode` chama:
-
-```text
-OpenRouterPatientResponseGenerator
-```
-
-que usa:
-
-```text
-PatientResponsePromptBuilder
-```
-
-e outro Structured Output simples:
-
-```json
-{
-  "message": "Sua consulta foi agendada com sucesso..."
-}
-```
-
----
-
-## Passo 15 — resposta HTTP
-
-O Controller devolve o estado relevante para o cliente.
-
-Fim do fluxo.
-
----
-
-# 12. Structured Output em mais detalhes
-
-Esse conceito merece atenção porque é reutilizável em muitos projetos de IA.
-
-## Sem Structured Output
-
-Você pede:
-
-```text
-Extraia os dados e responda em JSON.
-```
-
-O modelo pode responder:
-
-```text
-Com certeza! Aqui estão os dados:
-
-{
-  "intent": "schedule"
-}
-```
-
-Agora seu código precisa:
-
-```text
-remover texto extra
-achar onde começa {
-achar onde termina }
-tentar fazer parse
-tratar erro
-```
-
-É frágil.
-
----
-
-## Com Structured Output
-
-Você fornece formalmente o formato esperado.
-
-O modelo/provider recebe algo equivalente a:
-
-```text
-responda usando este schema
-```
-
-A documentação atual do OpenRouter explica que Structured Outputs servem para obter respostas consistentes que sigam um JSON Schema e possam ser processadas de forma confiável pela aplicação.
-
----
-
-## Structured Output não significa que a resposta está correta semanticamente
-
-Exemplo:
+Um JSON pode obedecer ao schema:
 
 ```json
 {
@@ -1158,50 +538,35 @@ Exemplo:
 }
 ```
 
-pode estar perfeitamente válido para o schema.
+e ainda não ter dados suficientes para agendar.
 
-Mas se o usuário não informou:
-
-```text
-paciente
-data
-profissional
-```
-
-a operação ainda não pode acontecer.
-
-Por isso existem **duas camadas**:
+Por isso existem duas responsabilidades:
 
 ```text
-Schema
-  ↓
+JSON Schema
+   ↓
 garante estrutura
 
 Validação Java
-  ↓
+   ↓
 garante pré-condições da operação
+```
+
+Essa é a razão de existir:
+
+```text
+MedicalAppointmentActionStateValidator
 ```
 
 ---
 
-# 13. Por que LangChain4j?
+# 6. LangChain4j e OpenRouter
 
-Sem LangChain4j, poderíamos escrever manualmente:
+## LangChain4j
 
-```text
-HttpClient
-headers
-JSON da requisição
-serialização
-desserialização
-tratamento de resposta
-```
+LangChain4j fornece abstrações Java para trabalhar com modelos.
 
-Isso é possível.
-
-Mas o objetivo da biblioteca é abstrair a interação com modelos.
-
-Neste projeto ela fornece abstrações como:
+O projeto utiliza conceitos como:
 
 ```text
 ChatModel
@@ -1214,15 +579,24 @@ JsonSchema
 ChatModelListener
 ```
 
-O projeto continua controlando a regra de negócio; LangChain4j cuida da camada de integração com o LLM.
+Sem essa abstração, seria possível integrar o provider manualmente com `HttpClient`, mas teríamos que cuidar diretamente de:
+
+```text
+HTTP
+headers
+JSON da requisição
+serialização
+desserialização
+erros do provider
+```
 
 ---
 
-# 14. Por que OpenRouter?
+## OpenRouter
 
-OpenRouter é o gateway usado pelo exemplo para acessar o modelo.
+OpenRouter é o gateway escolhido para acessar o modelo.
 
-Configuração:
+Configurações principais:
 
 ```properties
 OPENROUTER_API_KEY=...
@@ -1230,484 +604,521 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=...
 ```
 
-A vantagem arquitetural aqui é que:
+No código, o modelo é configurado em:
 
 ```text
-regra Java
-     ↓
-LangChain4j
-     ↓
-API compatível
-     ↓
-OpenRouter
-     ↓
-modelo
+AiClientConfiguration
 ```
 
-O modelo está em configuração, e não espalhado pela regra de negócio.
+O projeto usa um cliente compatível com a API OpenAI apontando para o endpoint do OpenRouter.
 
-> Disponibilidade e suporte a Structured Output variam por modelo e endpoint. O próprio OpenRouter informa que esse suporte pode existir apenas em determinados providers de um mesmo modelo.
+### Por que `require_parameters=true`?
+
+Structured Output depende de recursos que nem todo endpoint/provider oferece.
+
+O OpenRouter recomenda `require_parameters=true` quando é necessário garantir que a requisição seja roteada apenas para endpoints que suportem os parâmetros enviados.
 
 ---
 
-# 15. Por que LangGraph4j?
+# 7. LangGraph4j: State, Nodes e Edges
 
-Este projeto poderia ser implementado com:
+Esta é a parte mais importante para entender o workflow.
 
-```java
-if (intent.equals("schedule")) {
-    ...
-} else if (...) {
-    ...
+---
+
+## 7.1 State
+
+Classe:
+
+```text
+MedicalAppointmentGraphState
+```
+
+O State é o contexto compartilhado da execução.
+
+Uma analogia útil:
+
+> O State é uma mochila. Cada Node lê o que precisa e coloca novas informações nela.
+
+Estado inicial:
+
+```json
+{
+  "messages": [
+    "Meu nome é Maria e quero uma consulta amanhã às 16h."
+  ]
 }
 ```
 
-Para uma POC tão pequena, isso funcionaria.
+Depois da interpretação:
 
-Então por que usar LangGraph4j?
-
-Porque o objetivo didático é aprender um workflow de IA explícito e extensível.
-
-Hoje:
-
-```text
-identify
-  ↓
-schedule/cancel
-  ↓
-message
+```json
+{
+  "messages": ["..."],
+  "intent": "schedule",
+  "professionalId": 1,
+  "professionalName": "Dr. Alicio da Silva",
+  "datetime": "2026-10-05T16:00:00Z",
+  "patientName": "Maria"
+}
 ```
 
-Amanhã poderíamos ter:
+Depois da ação:
 
-```text
-identify
-  ↓
-missingData?
-  ├─ yes → askUser
-  └─ no
-       ↓
-checkAvailability
-       ↓
-needsConfirmation?
-       ↓
-confirm
-       ↓
-schedule
-       ↓
-message
+```json
+{
+  "...": "...",
+  "actionSuccess": true,
+  "appointmentData": {
+    "professionalId": 1,
+    "patientName": "Maria"
+  }
+}
 ```
 
-Quando o fluxo cresce, Nodes + Edges tornam o caminho mais visível.
+A documentação do LangGraph4j define `AgentState` como o estado recebido e atualizado pelos Nodes durante a execução.
 
 ---
 
-# 16. "Agente" ou "Workflow"?
+## 7.2 Node
 
-Este projeto é melhor entendido primeiro como um **workflow de IA**.
+Node é uma etapa do workflow.
 
-Existe IA participando do fluxo, mas as decisões possíveis são bastante controladas:
-
-```text
-schedule
-cancel
-unknown
-```
-
-Não é necessário imaginar um "agente autônomo que faz qualquer coisa".
-
-Isso é importante para não complicar o conceito.
-
-Primeiro aprenda:
+Um Node:
 
 ```text
-State
-Node
-Edge
-Conditional Edge
-LLM call
-Java action
+recebe o State
+     ↓
+executa uma responsabilidade
+     ↓
+devolve atualizações do State
 ```
 
-Depois avance para arquiteturas agentic mais complexas.
+Neste projeto:
+
+| Node | Responsabilidade |
+|---|---|
+| `IdentifyPatientAppointmentIntentNode` | identificar intenção e dados |
+| `ScheduleMedicalAppointmentNode` | executar agendamento |
+| `CancelMedicalAppointmentNode` | executar cancelamento |
+| `GeneratePatientResponseNode` | gerar mensagem final |
 
 ---
 
-# 17. Prompt engineering neste projeto
+## 7.3 Edge
 
-O projeto não usa um prompt solto de uma linha.
+Edge é uma transição entre Nodes.
 
-Ele organiza contexto.
-
-## Prompt para intenção
-
-Contém:
+Exemplo:
 
 ```text
-role
-task
-professionals
-current_date
-rules
-extraction_instructions
-examples
+schedule → message
 ```
 
-### Por que informar a data atual?
+Significa:
 
-Porque:
-
-```text
-"amanhã"
-```
-
-só pode ser convertido em data absoluta se o modelo tiver referência temporal.
-
-### Por que informar os profissionais?
-
-Porque queremos mapear:
-
-```text
-"Dr. Alicio"
-```
-
-para:
-
-```text
-professionalId = 1
-```
-
-### Por que exemplos?
-
-Exemplos ajudam a mostrar o comportamento esperado.
+> quando `schedule` terminar, execute `message`.
 
 ---
 
-# 18. Regra de negócio: onde realmente acontece
+## 7.4 Conditional Edge
+
+É uma transição cujo destino depende do State.
 
 Classe:
+
+```text
+RoutePatientRequestByIntent
+```
+
+Conceitualmente:
+
+```java
+switch (intent) {
+    case SCHEDULE -> "schedule";
+    case CANCEL   -> "cancel";
+    case UNKNOWN  -> "message";
+}
+```
+
+A documentação do LangGraph4j descreve Conditional Edges exatamente para esse tipo de roteamento dinâmico.
+
+---
+
+# 8. O que cada Node faz
+
+## 8.1 IdentifyPatientAppointmentIntentNode
+
+Entrada:
+
+```text
+mensagem do paciente
+```
+
+Passos:
+
+```text
+1. lê a pergunta do State
+2. chama PatientRequestInterpreter
+3. recebe Structured Output
+4. converte a intent
+5. atualiza o State
+```
+
+Ele **não agenda**.
+
+Sua responsabilidade termina quando a linguagem natural foi convertida em dados estruturados.
+
+---
+
+## 8.2 ScheduleMedicalAppointmentNode
+
+Executado quando:
+
+```text
+intent = schedule
+```
+
+Passos:
+
+```text
+1. valida o State
+2. converte datetime para Instant
+3. chama MedicalAppointmentService
+4. registra sucesso ou erro no State
+```
+
+---
+
+## 8.3 CancelMedicalAppointmentNode
+
+Executado quando:
+
+```text
+intent = cancel
+```
+
+Passos:
+
+```text
+1. valida o State
+2. procura a consulta
+3. pede ao Service para cancelar
+4. registra o resultado
+```
+
+---
+
+## 8.4 GeneratePatientResponseNode
+
+É a última etapa.
+
+Recebe algo técnico:
+
+```json
+{
+  "intent": "schedule",
+  "actionSuccess": false,
+  "actionError": "Horário indisponível"
+}
+```
+
+e produz uma mensagem adequada ao usuário.
+
+Se essa segunda chamada de IA falhar, o projeto possui um fallback em Java.
+
+Isso demonstra um princípio útil:
+
+> Recursos de IA podem falhar; a aplicação deve definir comportamento de fallback quando isso fizer sentido.
+
+---
+
+# 9. Regra de negócio: onde a IA termina
+
+A regra principal fica em:
 
 ```text
 MedicalAppointmentService
 ```
 
-Agendamento:
+## Agendamento
 
 ```text
-verifica profissional
+verificar profissional
       ↓
-verifica conflito de horário
+verificar conflito de horário
       ↓
-cria MedicalAppointment
+criar MedicalAppointment
       ↓
-salva
+salvar
 ```
 
-Cancelamento:
+## Cancelamento
 
 ```text
-verifica profissional
+verificar profissional
       ↓
-procura consulta exata
+localizar consulta
       ↓
-remove
+remover
 ```
 
-Esse é um ponto fundamental:
+Essa separação é intencional.
+
+Evite pensar:
 
 ```text
-Prompt não substitui regra de negócio.
-LLM não substitui Service.
+"Vou colocar a regra inteira no prompt."
+```
+
+Prefira:
+
+```text
+LLM     → interpretação
+Service → regra de negócio
 ```
 
 ---
 
-# 19. Repository em memória
+# 10. Raio-X de uma requisição
 
-Classe:
+Vamos seguir uma execução inteira.
 
-```text
-InMemoryMedicalAppointmentRepository
+Entrada HTTP:
+
+```json
+{
+  "question": "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h"
+}
 ```
-
-Esse projeto não usa PostgreSQL.
-
-Por quê?
-
-Porque o objetivo da POC é estudar:
-
-```text
-LLM
-Structured Output
-LangChain4j
-LangGraph4j
-tracing
-```
-
-Adicionar banco real aumentaria a quantidade de conceitos ao mesmo tempo.
-
-Limitação:
-
-```text
-reiniciou a aplicação
-      ↓
-dados criados são perdidos
-```
-
-Em um projeto real, o Repository poderia ser substituído por persistência real.
 
 ---
 
-# 20. Interfaces de IA e testabilidade
-
-Existem interfaces:
+## Passo 1 — Controller
 
 ```text
-PatientRequestInterpreter
-PatientResponseGenerator
+MedicalAppointmentChatController
 ```
 
-e implementações:
+Responsabilidades:
+
+```text
+receber HTTP
+validar entrada
+chamar o executor
+devolver HTTP
+```
+
+Ele não contém regra de IA nem regra de negócio.
+
+---
+
+## Passo 2 — Executor
+
+```text
+MedicalAppointmentGraphExecutor
+```
+
+Cria a entrada inicial:
+
+```json
+{
+  "messages": [
+    "Meu nome é Maria Santos e quero uma consulta..."
+  ]
+}
+```
+
+e inicia o grafo.
+
+---
+
+## Passo 3 — Identificação
+
+```text
+IdentifyPatientAppointmentIntentNode
+```
+
+chama:
 
 ```text
 OpenRouterPatientRequestInterpreter
-OpenRouterPatientResponseGenerator
-```
-
-Por quê?
-
-Para permitir:
-
-```text
-produção → OpenRouter real
-teste    → implementação fake/controlada
-```
-
-Isso permite testar o grafo sem depender sempre de:
-
-```text
-internet
-API key
-rate limit
-modelo externo
-resposta probabilística
-```
-
-Esse é um princípio de engenharia de software aplicado à IA:
-
-> **isole dependências externas atrás de contratos.**
-
----
-
-# 21. Erros: processamento versus negócio
-
-O projeto diferencia dois tipos importantes.
-
-## processingError
-
-Falha técnica relacionada ao processamento.
-
-Exemplos:
-
-```text
-OpenRouter indisponível
-resposta vazia
-erro ao converter JSON
 ```
 
 ---
 
-## actionError
-
-A IA entendeu o pedido, mas a operação de negócio falhou.
-
-Exemplos:
+## Passo 4 — Prompt
 
 ```text
-horário indisponível
-consulta não encontrada
-profissional inexistente
+MedicalAppointmentIntentPromptBuilder
 ```
 
-Essa separação ajuda a diagnosticar:
+adiciona:
 
 ```text
-o LLM falhou?
-ou
-a regra Java rejeitou a operação?
+regras
+profissionais
+data atual
+exemplos
+instruções de extração
+```
+
+A data atual é importante para expressões como:
+
+```text
+hoje
+amanhã
+depois de amanhã
 ```
 
 ---
 
-# 22. LangGraph4j Studio
-
-O Studio é a ferramenta visual do grafo.
-
-Com a aplicação executando:
+## Passo 5 — Schema
 
 ```text
-http://localhost:3000/?instance=medical_appointments
+MedicalAppointmentStructuredOutputSchemas
 ```
 
-Entrada:
-
-```text
-messages
-```
-
-Exemplo:
-
-```text
-Meu nome é Maria e quero marcar com o Dr. Alicio amanhã às 16h.
-```
-
-Use o Studio para visualizar:
-
-```text
-START
-  ↓
-identifyIntent
-  ↓
-schedule/cancel/message
-  ↓
-message
-  ↓
-END
-```
-
-A documentação do LangGraph4j indica Studio/visual debugging justamente para observar e iterar sobre grafos de forma interativa.
+define a estrutura esperada.
 
 ---
 
-# 23. LangSmith e OpenTelemetry
-
-LangSmith é observabilidade.
-
-Não é o serviço que executa a LLM.
-
-Compare:
+## Passo 6 — Chamada ao modelo
 
 ```text
-OpenRouter → executa/acessa modelo
-LangSmith  → observa execuções
+OpenRouterStructuredOutputClient
 ```
 
-## 23.1 O que é um trace?
+monta a requisição e chama:
 
-Um trace representa uma execução completa.
-
-Exemplo conceitual:
-
-```text
-medical_appointments
-├── identifyIntent
-│   └── openrouter.chat
-├── schedule
-└── message
-    └── openrouter.chat
-```
-
-Dentro dele existem etapas menores, chamadas de runs/spans.
-
----
-
-## 23.2 Por que OpenTelemetry?
-
-Na versão Java, o projeto faz:
-
-```text
-LangGraph4j/LangChain4j
-        ↓
-OpenTelemetry
-        ↓
-LangSmith
-```
-
-Classes:
-
-```text
-LangSmithOpenTelemetryConfiguration
-LangGraphTracingConfiguration
-LangSmithChatModelTraceListener
+```java
+chatModel.chat(...)
 ```
 
 ---
 
-## 23.3 Para começar, deixe tracing desligado
+## Passo 7 — Desserialização
 
-Se você está estudando o fluxo principal:
-
-```properties
-LANGSMITH_TRACING=false
-```
-
-Primeiro domine:
+A resposta JSON é convertida para:
 
 ```text
-entrada
-Structured Output
-State
-routing
-regra
-saída
+ExtractedMedicalAppointmentIntent
 ```
 
-Depois habilite observabilidade.
+Agora temos um objeto Java tipado.
 
 ---
 
-# 24. Variáveis de ambiente
+## Passo 8 — Atualização do State
 
-Crie:
-
-```text
-.env
-```
-
-a partir de:
+O Node adiciona:
 
 ```text
-.env.example
+intent
+professionalId
+professionalName
+datetime
+patientName
+reason
 ```
-
-## Configuração mínima
-
-```properties
-OPENROUTER_API_KEY=sua_chave
-OPENROUTER_MODEL=arcee-ai/trinity-large-preview:free
-LANGSMITH_TRACING=false
-```
-
-## Com LangSmith
-
-```properties
-LANGSMITH_API_KEY=sua_chave
-LANGSMITH_TRACING=true
-LANGSMITH_PROJECT=poc-java-ia-consultamedica
-LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-```
-
-> O modelo padrão é configuração da POC. Modelos gratuitos e suporte a parâmetros podem mudar no OpenRouter; se necessário, escolha outro modelo/endpoint compatível com Structured Output.
 
 ---
 
-# 25. Como executar
+## Passo 9 — Roteamento
 
-Pré-requisitos:
+```text
+RoutePatientRequestByIntent
+```
+
+lê:
+
+```text
+intent = schedule
+```
+
+e escolhe:
+
+```text
+ScheduleMedicalAppointmentNode
+```
+
+---
+
+## Passo 10 — Validação
+
+```text
+MedicalAppointmentActionStateValidator
+```
+
+confere se a ação tem dados suficientes.
+
+Essa é a ideia:
+
+> **confia no resultado estruturado, mas valida de novo na fronteira da regra.**
+
+---
+
+## Passo 11 — Service
+
+```text
+MedicalAppointmentService
+```
+
+executa a regra Java.
+
+---
+
+## Passo 12 — Mensagem final
+
+O grafo segue para:
+
+```text
+GeneratePatientResponseNode
+```
+
+que chama a IA novamente para transformar o resultado técnico em uma frase amigável.
+
+---
+
+## Passo 13 — Resposta HTTP
+
+O Controller devolve o resultado.
+
+Fim.
+
+---
+
+# 11. Como executar
+
+## Pré-requisitos
 
 ```text
 JDK 21
 Maven 3.9+
 ```
 
-Confira:
+Verifique:
 
 ```bash
 java -version
 mvn -version
 ```
 
-Copie o `.env`:
+---
+
+## Configure as variáveis
+
+Copie:
+
+```text
+.env.example
+```
+
+para:
+
+```text
+.env
+```
 
 Linux/macOS:
 
@@ -1721,159 +1132,236 @@ PowerShell:
 Copy-Item .env.example .env
 ```
 
-Testes:
+### Configuração mínima
+
+```properties
+OPENROUTER_API_KEY=sua_chave
+OPENROUTER_MODEL=arcee-ai/trinity-large-preview:free
+
+LANGSMITH_TRACING=false
+```
+
+> O modelo acima é o padrão configurado nesta POC. Disponibilidade e suporte a Structured Output podem mudar. Se necessário, configure outro modelo/provider compatível.
+
+
+## Referência de configuração
+
+| Variável | Obrigatória? | Função |
+|---|---:|---|
+| `OPENROUTER_API_KEY` | sim | autenticação no OpenRouter |
+| `OPENROUTER_BASE_URL` | não | endpoint compatível com OpenAI |
+| `OPENROUTER_MODEL` | sim* | modelo utilizado |
+| `OPENROUTER_TEMPERATURE` | não | controla variabilidade da geração |
+| `OPENROUTER_TIMEOUT_SECONDS` | não | timeout da chamada |
+| `OPENROUTER_HTTP_REFERER` | não | metadado opcional do OpenRouter |
+| `OPENROUTER_X_TITLE` | não | nome opcional da aplicação |
+| `LANGSMITH_TRACING` | não | liga/desliga tracing |
+| `LANGSMITH_API_KEY` | se tracing=true | autenticação no LangSmith |
+| `LANGSMITH_PROJECT` | se tracing=true | agrupa traces |
+| `LANGSMITH_ENDPOINT` | não | endpoint do LangSmith |
+| `LANGSMITH_INCLUDE_LLM_PAYLOADS` | não | controla inclusão de payloads do LLM no trace |
+
+`*` O projeto possui um valor padrão, mas mantê-lo no `.env` torna a configuração explícita.
+
+> **Documentação técnica:** segredos ficam fora do código e o `.env` não deve ser versionado.
+
+---
+
+## Rode os testes
 
 ```bash
 mvn clean test
 ```
 
-Aplicação:
+---
+
+## Inicie a aplicação
 
 ```bash
 mvn spring-boot:run
 ```
 
-Porta:
+Servidor:
 
 ```text
-3000
+http://localhost:3000
 ```
 
 ---
 
-# 26. Testando a API
+# 12. API REST
 
-Endpoint original preservado:
+## POST `/chat`
 
-```text
-POST /chat
+Endpoint principal, preservado do projeto original.
+
+### Request
+
+```json
+{
+  "question": "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h"
+}
 ```
 
-Alias mais descritivo:
+Regra de entrada:
 
 ```text
-POST /api/medical-appointments/chat
+question:
+obrigatória
+mínimo de 10 caracteres
 ```
 
-Exemplo:
+### Exemplo com cURL
 
 ```bash
 curl --request POST \
   --url http://localhost:3000/chat \
   --header 'Content-Type: application/json' \
   --data '{
-    "question": "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio da Silva amanhã às 16h para um check-up"
+    "question": "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h"
   }'
 ```
 
-A propriedade:
+---
+
+## Alias
+
+Também existe:
 
 ```text
-question
+POST /api/medical-appointments/chat
 ```
 
-deve ter pelo menos 10 caracteres.
+O alias é mais descritivo para uma API REST, mas `/chat` foi mantido por compatibilidade com o exemplo original.
 
 ---
 
-# 27. Teste três situações para aprender
-
-Não tente testar vinte casos de uma vez.
-
-## Caso A — schedule
+## Campos relevantes da resposta
 
 ```text
-Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h.
+messages
+intent
+professionalId
+professionalName
+datetime
+patientName
+reason
+actionSuccess
+actionError
+error
+appointmentData
+message
 ```
 
-Observe:
+
+### Exemplo de resposta de sucesso
+
+```json
+{
+  "messages": [
+    "Meu nome é Maria Santos e quero uma consulta com o Dr. Alicio amanhã às 16h",
+    "Sua consulta foi agendada com sucesso."
+  ],
+  "intent": "schedule",
+  "professionalId": 1,
+  "professionalName": "Dr. Alicio da Silva",
+  "datetime": "2026-10-05T16:00:00Z",
+  "patientName": "Maria Santos",
+  "reason": null,
+  "actionSuccess": true,
+  "actionError": null,
+  "error": null,
+  "appointmentData": {
+    "professionalId": 1,
+    "patientName": "Maria Santos"
+  },
+  "message": "Sua consulta foi agendada com sucesso."
+}
+```
+
+> **Observação:** o texto da mensagem pode variar porque é gerado por modelo. Campos de negócio e routing são os pontos mais importantes para testes determinísticos.
+
+---
+
+# 13. Dados de demonstração
+
+O projeto possui profissionais fictícios cadastrados em memória.
+
+A fonte está em:
 
 ```text
-intent = schedule
+MedicalProfessionalDirectory
+```
+
+Os agendamentos também são mantidos em memória:
+
+```text
+InMemoryMedicalAppointmentRepository
+```
+
+Consequência:
+
+> Ao reiniciar a aplicação, alterações feitas durante a execução são perdidas.
+
+Isso foi mantido para que a POC foque em IA e workflow, e não em persistência.
+
+---
+
+# 14. Testes
+
+## Comportamentos que o projeto deve garantir
+
+| Cenário | Resultado esperado |
+|---|---|
+| pedido de agendamento válido | `intent=schedule` e ação executada |
+| horário ocupado | `actionSuccess=false` com `actionError` |
+| cancelamento existente | `intent=cancel` e remoção da consulta |
+| cancelamento inexistente | erro de negócio, não erro de parsing |
+| assunto fora do domínio | `intent=unknown` e nenhuma alteração de negócio |
+| falha na geração da mensagem final | fallback Java |
+| teste unitário/local | não depende obrigatoriamente de LLM externo |
+
+> **Aprendizado:** em sistemas com IA, teste o que deve ser determinístico separadamente do que é probabilístico.
+
+
+
+## 14.1 Testes de regra
+
+```text
+MedicalAppointmentServiceTest
+```
+
+Testam Java puro e regras previsíveis.
+
+---
+
+## 14.2 Teste do workflow
+
+```text
+MedicalAppointmentGraphFlowTest
+```
+
+Usa dependências controladas para verificar o caminho do grafo sem depender de uma LLM real.
+
+Isso é importante porque testes de negócio não deveriam depender sempre de:
+
+```text
+internet
+API externa
+quota
+rate limit
+resposta probabilística
 ```
 
 ---
 
-## Caso B — cancel
-
-Primeiro crie uma consulta e depois envie algo como:
+## 14.3 E2E real com OpenRouter
 
 ```text
-Cancele minha consulta com a Dra. Ana hoje às 16h.
-Meu nome é Joao da Silva.
+OpenRouterMedicalAppointmentE2ETest
 ```
 
-Observe:
-
-```text
-intent = cancel
-```
-
----
-
-## Caso C — unknown
-
-```text
-Qual é a previsão do tempo para amanhã?
-```
-
-Observe:
-
-```text
-intent = unknown
-```
-
-Esse teste ajuda a entender a Conditional Edge.
-
----
-
-# 28. Collection Postman
-
-Arquivo:
-
-```text
-postman/poc_java_ia_consultamedica.postman_collection.json
-```
-
-Ela contém cenários prontos.
-
-Use o Postman para:
-
-```text
-1. chamar endpoint;
-2. ler resposta;
-3. acompanhar logs;
-4. abrir Studio;
-5. depois comparar com trace.
-```
-
-Essa sequência ajuda a não misturar muitas ferramentas ao mesmo tempo.
-
----
-
-# 29. Testes automatizados
-
-## MedicalAppointmentServiceTest
-
-Testa a regra Java.
-
-Não precisa de LLM.
-
----
-
-## MedicalAppointmentGraphFlowTest
-
-Testa o fluxo do grafo usando dependências controladas.
-
-Ajuda a verificar routing sem depender do OpenRouter.
-
----
-
-## OpenRouterMedicalAppointmentE2ETest
-
-É o teste mais próximo do fluxo real.
-
-Executa com opt-in:
+Executa o caminho real.
 
 ```bash
 mvn -DrunOpenRouterE2E=true \
@@ -1881,24 +1369,141 @@ mvn -DrunOpenRouterE2E=true \
     test
 ```
 
-Esse teste depende de:
+Pré-requisitos:
 
 ```text
+OPENROUTER_API_KEY válida
 internet
-OPENROUTER_API_KEY
 modelo disponível
-provider compatível
+endpoint compatível
 ```
 
 ---
 
-# 30. Por onde estudar o código?
+# 15. Observabilidade
 
-Não abra 38 classes aleatoriamente.
+## 15.1 LangGraph4j Studio
 
-Siga esta ordem.
+Com a aplicação rodando:
 
-## Etapa 1 — enxergue a entrada
+```text
+http://localhost:3000/?instance=medical_appointments
+```
+
+Use o Studio para visualizar:
+
+```text
+START
+  ↓
+identifyIntent
+  ↓
+schedule / cancel / message
+  ↓
+message
+  ↓
+END
+```
+
+Ele é útil para aprender e depurar o workflow.
+
+---
+
+## 15.2 LangSmith
+
+LangSmith não executa o modelo.
+
+Ele recebe informações de observabilidade.
+
+Configuração:
+
+```properties
+LANGSMITH_API_KEY=sua_chave
+LANGSMITH_TRACING=true
+LANGSMITH_PROJECT=poc-java-ia-consultamedica
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+```
+
+Fluxo conceitual:
+
+```text
+LangGraph4j / LangChain4j
+        ↓
+OpenTelemetry
+        ↓
+LangSmith
+```
+
+Trace esperado:
+
+```text
+medical_appointments
+├── identifyIntent
+│   └── openrouter.chat
+├── schedule ou cancel
+└── message
+    └── openrouter.chat
+```
+
+Para estudar o básico primeiro:
+
+```properties
+LANGSMITH_TRACING=false
+```
+
+Habilite tracing depois que o workflow principal estiver claro.
+
+---
+
+# 16. Estrutura do código
+
+```text
+src/main/java/.../
+│
+├── api/
+│   ├── MedicalAppointmentChatController
+│   ├── MedicalAppointmentChatRequest
+│   └── MedicalAppointmentChatResponse
+│
+├── ai/
+│   ├── OpenRouterStructuredOutputClient
+│   ├── OpenRouterPatientRequestInterpreter
+│   ├── OpenRouterPatientResponseGenerator
+│   ├── prompt/
+│   └── schema/
+│
+├── graph/
+│   ├── MedicalAppointmentGraphConfiguration
+│   ├── MedicalAppointmentGraphExecutor
+│   ├── MedicalAppointmentGraphState
+│   ├── node/
+│   ├── route/
+│   └── validation/
+│
+├── service/
+│   ├── MedicalAppointmentService
+│   └── MedicalProfessionalDirectory
+│
+├── repository/
+│   └── InMemoryMedicalAppointmentRepository
+│
+├── config/
+│   ├── AiClientConfiguration
+│   └── LangGraphStudioConfiguration
+│
+└── observability/
+    ├── LangGraphTracingConfiguration
+    └── LangSmithChatModelTraceListener
+```
+
+---
+
+# 17. Guia de estudo passo a passo
+
+Não leia todas as classes aleatoriamente.
+
+## Etapa 1 — HTTP
+
+Estude:
 
 ```text
 MedicalAppointmentChatController
@@ -1906,13 +1511,13 @@ MedicalAppointmentChatRequest
 MedicalAppointmentChatResponse
 ```
 
-Pergunta:
+Pergunta a responder:
 
-> Como a requisição entra e sai?
+> Como os dados entram e saem?
 
 ---
 
-## Etapa 2 — entenda o grafo
+## Etapa 2 — Grafo
 
 ```text
 MedicalAppointmentGraphExecutor
@@ -1922,11 +1527,11 @@ MedicalAppointmentGraphState
 
 Pergunta:
 
-> Quem executa o workflow e onde ficam os dados?
+> Onde o workflow começa e onde o contexto é armazenado?
 
 ---
 
-## Etapa 3 — entenda a IA de entrada
+## Etapa 3 — IA de entrada
 
 ```text
 IdentifyPatientAppointmentIntentNode
@@ -1938,11 +1543,11 @@ OpenRouterStructuredOutputClient
 
 Pergunta:
 
-> Como texto vira objeto Java?
+> Como uma String vira um objeto Java estruturado?
 
 ---
 
-## Etapa 4 — entenda o roteamento
+## Etapa 4 — Roteamento
 
 ```text
 RoutePatientRequestByIntent
@@ -1950,11 +1555,11 @@ RoutePatientRequestByIntent
 
 Pergunta:
 
-> Como o sistema escolhe schedule, cancel ou unknown?
+> Como `intent` altera o caminho da aplicação?
 
 ---
 
-## Etapa 5 — entenda a regra
+## Etapa 5 — Regra Java
 
 ```text
 MedicalAppointmentActionStateValidator
@@ -1966,11 +1571,11 @@ InMemoryMedicalAppointmentRepository
 
 Pergunta:
 
-> Onde a IA termina e a regra Java começa?
+> Onde termina a interpretação da IA e começa a regra determinística?
 
 ---
 
-## Etapa 6 — entenda a saída
+## Etapa 6 — Resposta
 
 ```text
 GeneratePatientResponseNode
@@ -1980,11 +1585,11 @@ PatientResponsePromptBuilder
 
 Pergunta:
 
-> Como resultado técnico vira mensagem humana?
+> Como um resultado técnico vira uma mensagem amigável?
 
 ---
 
-## Etapa 7 — só depois estude observabilidade
+## Etapa 7 — Observabilidade
 
 ```text
 LangGraphStudioConfiguration
@@ -1993,73 +1598,168 @@ LangGraphTracingConfiguration
 LangSmithChatModelTraceListener
 ```
 
----
+Pergunta:
 
-# 31. Tabela: conceito → classe
-
-| Conceito | Classe principal |
-|---|---|
-| REST | `MedicalAppointmentChatController` |
-| entrada | `MedicalAppointmentChatRequest` |
-| workflow | `MedicalAppointmentGraphConfiguration` |
-| State | `MedicalAppointmentGraphState` |
-| início do grafo | `MedicalAppointmentGraphExecutor` |
-| interpretação | `IdentifyPatientAppointmentIntentNode` |
-| prompt de intenção | `MedicalAppointmentIntentPromptBuilder` |
-| Structured Output | `MedicalAppointmentStructuredOutputSchemas` |
-| chamada ao LLM | `OpenRouterStructuredOutputClient` |
-| routing | `RoutePatientRequestByIntent` |
-| validação | `MedicalAppointmentActionStateValidator` |
-| agendamento | `ScheduleMedicalAppointmentNode` |
-| cancelamento | `CancelMedicalAppointmentNode` |
-| regra de negócio | `MedicalAppointmentService` |
-| dados fake | `InMemoryMedicalAppointmentRepository` |
-| resposta amigável | `GeneratePatientResponseNode` |
-| Studio | `LangGraphStudioConfiguration` |
-| tracing do grafo | `LangGraphTracingConfiguration` |
-| tracing do modelo | `LangSmithChatModelTraceListener` |
+> Como observar o que aconteceu sem misturar observabilidade com regra de negócio?
 
 ---
 
-# 32. O que foi migrado de JavaScript para Java?
+# 18. Limitações e próximos passos
 
-| Conceito original | Java |
-|---|---|
-| LangChain JS | LangChain4j |
-| LangGraph JS | LangGraph4j |
-| ChatOpenAI | `OpenAiChatModel` configurado para OpenRouter |
-| Zod | `JsonSchema` + records + validação Java |
-| GraphState | `MedicalAppointmentGraphState` |
-| Node functions | classes `NodeAction` |
-| conditional edges | `RoutePatientRequestByIntent` |
-| service em memória | Service + Repository Java |
-| tracing | OpenTelemetry + LangSmith |
-| Studio | LangGraph4j Studio |
-
-A migração não é uma tradução linha por linha.
-
-O objetivo foi preservar:
+Esta POC não implementa:
 
 ```text
-conceito
-responsabilidade
-workflow
-aprendizado
+autenticação
+autorização
+PostgreSQL
+LGPD para produção
+controle completo de timezone
+idempotência
+concorrência distribuída
+circuit breaker
+retry de produção
+confirmação humana
+memória persistente de conversa
 ```
 
-usando APIs adequadas ao ecossistema Java.
+Isso é proposital.
+
+O objetivo atual é dominar:
+
+```text
+LLM
++
+Structured Output
++
+State
++
+Workflow
++
+Regra Java
+```
+
+Possíveis evoluções:
+
+1. criar `check_availability`;
+2. adicionar confirmação antes do cancelamento;
+3. substituir memória por PostgreSQL;
+4. criar IDs de consulta;
+5. adicionar timezone explícito;
+6. implementar fallback de modelo;
+7. adicionar métricas;
+8. criar avaliações automatizadas do Structured Output.
 
 ---
 
-# 33. Como refazer este projeto do zero sem copiar
+## O que faltaria para produção?
 
-Esta é a parte mais importante para transferir conhecimento.
+Esta POC é intencionalmente menor que um sistema real.
 
-Feche o código atual e use apenas esta sequência.
+Para produção, seria necessário avaliar pelo menos:
+
+```text
+persistência transacional
+autenticação e autorização
+LGPD e redaction
+timezone do paciente/clínica
+idempotência
+locking/concorrência de horários
+retry e circuit breaker
+rate limiting
+métricas e alertas
+auditoria
+confirmação de ações destrutivas
+avaliação de qualidade do LLM
+fallback de provider/modelo
+```
+
+> **Decisão de escopo:** esses itens não foram adicionados porque prejudicariam o objetivo didático da POC. Eles são evolução, não pré-requisito para aprender o padrão.
 
 ---
 
-## Passo 1 — escolha um problema pequeno
+# 19. Troubleshooting
+
+## `OPENROUTER_API_KEY` não configurada
+
+Verifique:
+
+```properties
+OPENROUTER_API_KEY=...
+```
+
+no `.env`.
+
+---
+
+## Modelo não aceita Structured Output
+
+Sintoma:
+
+```text
+erro relacionado a response_format/json_schema
+```
+
+Verifique se o modelo/provider configurado suporta Structured Outputs.
+
+O OpenRouter documenta esse suporte por endpoint/provider e recomenda `require_parameters=true` quando esses parâmetros são obrigatórios.
+
+---
+
+## `intent` parece correta, mas a ação falha
+
+Isso pode ser esperado.
+
+Exemplo:
+
+```text
+intent = schedule
+```
+
+mas faltou:
+
+```text
+patientName
+datetime
+professionalId
+```
+
+Structured Output e validação da ação são camadas diferentes.
+
+---
+
+## Consulta criada desapareceu
+
+O repository é em memória.
+
+Reiniciar a aplicação limpa os dados criados durante a execução.
+
+---
+
+## Trace não aparece
+
+Confira:
+
+```properties
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=...
+```
+
+Se estiver apenas estudando o fluxo funcional, mantenha tracing desligado inicialmente.
+
+---
+
+# 20. Como reproduzir o conhecimento em outro projeto
+
+Esta é a seção mais importante para verificar se você realmente aprendeu.
+
+Não copie este projeto inteiro.
+
+Repita o raciocínio.
+
+---
+
+## Passo 1 — escolha um domínio pequeno
 
 Exemplo:
 
@@ -2067,11 +1767,10 @@ Exemplo:
 suporte técnico
 ```
 
-Usuário:
+Entrada:
 
 ```text
-Meu sistema não está abrindo.
-Quero criar um chamado.
+Meu sistema não abre. Quero criar um chamado.
 ```
 
 ---
@@ -2084,13 +1783,9 @@ close_ticket
 unknown
 ```
 
-Não comece com 20 intenções.
-
 ---
 
-## Passo 3 — desenhe o Structured Output no papel
-
-Exemplo:
+## Passo 3 — desenhe o Structured Output
 
 ```json
 {
@@ -2101,27 +1796,26 @@ Exemplo:
 }
 ```
 
-Pergunte:
+Antes de escrever código, pergunte:
 
 ```text
-Quais campos a IA deve extrair?
-Quais são obrigatórios?
-Quais são opcionais?
+quais campos preciso extrair?
+quais são obrigatórios?
+quais são opcionais?
 ```
 
 ---
 
-## Passo 4 — crie um record Java
-
-Exemplo:
+## Passo 4 — crie o tipo Java
 
 ```java
 record ExtractedSupportIntent(
-    String intent,
-    String customerName,
-    String category,
-    String description
-) {}
+        String intent,
+        String customerName,
+        String category,
+        String description
+) {
+}
 ```
 
 ---
@@ -2132,16 +1826,17 @@ Defina:
 
 ```text
 tipos
-campos obrigatórios
-enum de intent
+enum
+required
 descrições
+additionalProperties
 ```
 
 ---
 
-## Passo 6 — faça uma chamada simples ao LLM
+## Passo 6 — prove a extração antes do grafo
 
-Antes de usar grafo, prove isto:
+Primeiro faça funcionar:
 
 ```text
 String
@@ -2153,11 +1848,11 @@ Structured JSON
 record Java
 ```
 
-Se essa parte não funciona, não adicione LangGraph ainda.
+Só depois adicione LangGraph4j.
 
 ---
 
-## Passo 7 — crie o State
+## Passo 7 — modele o State
 
 Exemplo:
 
@@ -2182,11 +1877,9 @@ closeTicket
 generateMessage
 ```
 
-Cada Node deve ter uma responsabilidade clara.
-
 ---
 
-## Passo 9 — desenhe o grafo antes de codificar
+## Passo 9 — desenhe o grafo
 
 ```text
 START
@@ -2199,43 +1892,35 @@ identifyIntent
 
 ---
 
-## Passo 10 — implemente a regra em Service
-
-Não coloque:
-
-```text
-"se puder, abra um chamado"
-```
-
-e espere que a LLM faça a regra.
+## Passo 10 — Service Java
 
 Crie:
 
 ```java
 SupportTicketService.openTicket(...)
+SupportTicketService.closeTicket(...)
 ```
+
+A LLM entende a frase.
+
+O Service executa a regra.
 
 ---
 
-## Passo 11 — escreva testes sem LLM
+## Passo 11 — teste sem LLM real
 
-Faça o interpretador fake retornar:
-
-```text
-open_ticket
-```
-
-e teste se o grafo chega ao Node correto.
+Substitua o interpretador por uma implementação controlada e confirme o routing.
 
 ---
 
-## Passo 12 — adicione E2E
+## Passo 12 — E2E real
 
-Só depois teste:
+Depois teste:
 
 ```text
 HTTP
-→ IA real
+→ modelo
+→ Structured Output
 → State
 → Graph
 → Service
@@ -2244,230 +1929,102 @@ HTTP
 
 ---
 
-## Passo 13 — adicione observabilidade por último
+## Passo 13 — observabilidade
 
-Depois que o sistema funciona:
+Somente depois adicione:
 
 ```text
 Studio
+tracing
 LangSmith
-OpenTelemetry
+métricas
 ```
 
-Observabilidade ajuda a entender um sistema existente; ela não deve esconder um fluxo que você ainda não entendeu.
+Se você consegue executar esses passos em outro domínio, o conhecimento foi transferido.
 
 ---
 
-# 34. Template mental reutilizável
+# 21. Exercícios
 
-Quando criar outra POC, preencha:
+## Nível 1 — compreensão
 
-```text
-DOMÍNIO:
-________________________________
+Responda sem abrir o código:
 
-FRASE DE ENTRADA:
-________________________________
-
-INTENÇÕES:
-1. ______________________________
-2. ______________________________
-3. unknown
-
-DADOS QUE DEVEM SER EXTRAÍDOS:
-- ______________________________
-- ______________________________
-- ______________________________
-
-NODES:
-- identifyIntent
-- ______________________________
-- ______________________________
-- generateMessage
-
-REGRA DE NEGÓCIO:
-________________________________
-
-CONDITIONAL EDGE:
-intent A → ______________________
-intent B → ______________________
-unknown  → message
-```
-
-Se você consegue preencher esse template, já consegue começar outra implementação.
-
----
-
-# 35. Exercícios para fixar
-
-## Nível 1 — leitura
-
-Sem alterar código, responda:
-
-1. Qual classe recebe o HTTP?
-2. Onde o grafo é definido?
-3. Onde fica o State?
+1. Quem recebe o HTTP?
+2. Qual classe contém o State?
+3. Quem chama o modelo?
 4. Onde está o JSON Schema?
-5. Qual classe realmente agenda?
-6. Quem decide schedule/cancel?
-7. Qual é a função do LangSmith?
+5. Quem decide schedule/cancel?
+6. Qual classe realmente agenda?
+7. Qual a diferença entre `actionError` e erro de processamento?
+8. Para que serve LangSmith?
 
 ---
 
-## Nível 2 — pequena alteração
+## Nível 2 — alteração simples
 
-Adicione uma nova especialidade e um novo profissional em:
+Adicione um novo profissional em:
 
 ```text
 MedicalProfessionalDirectory
 ```
 
-Teste uma frase citando esse profissional.
+Depois teste uma frase mencionando esse profissional.
 
 ---
 
 ## Nível 3 — nova intenção
 
-Crie:
+Implemente:
 
 ```text
 check_availability
 ```
 
-O objetivo é somente consultar disponibilidade, sem criar consulta.
-
-Você precisará pensar em:
+Você provavelmente precisará alterar:
 
 ```text
 enum
 schema
 prompt
-routing
+router
 novo Node
-nova Edge
 Service
 testes
 ```
 
-Esse exercício prova se você realmente entendeu a arquitetura.
-
 ---
 
-## Nível 4 — outro domínio
+## Nível 4 — novo projeto
 
-Crie uma POC nova:
+Crie:
 
 ```text
 poc_java_ia_suporte
 ```
 
-Sem copiar classes inteiras.
+sem copiar classes completas.
 
-Use apenas os conceitos aprendidos.
-
-Se conseguir fazer isso, o conhecimento foi transferido.
+Use somente o padrão aprendido.
 
 ---
 
-# 36. Perguntas comuns
+# 22. Mapeamento das aulas para o código Java
 
-## "Por que não deixar a IA fazer o agendamento?"
-
-Porque regras de negócio precisam ser:
-
-```text
-previsíveis
-testáveis
-auditáveis
-controladas
-```
-
-A LLM é útil para interpretação, não para substituir indiscriminadamente o Service.
-
----
-
-## "Structured Output elimina erros da IA?"
-
-Não.
-
-Ele melhora a confiabilidade do **formato**.
-
-Ainda é necessário validar significado e regras de negócio.
-
----
-
-## "Preciso de LangGraph4j para qualquer projeto com IA?"
-
-Não.
-
-Uma chamada simples:
-
-```text
-texto → LLM → resposta
-```
-
-pode não precisar de grafo.
-
-Use workflow/graph quando existirem várias etapas, caminhos, estado compartilhado ou necessidade de evolução do fluxo.
-
----
-
-## "LangChain4j é a IA?"
-
-Não.
-
-É uma biblioteca Java que ajuda a integrar sua aplicação com modelos/provedores.
-
----
-
-## "OpenRouter é o modelo?"
-
-Não necessariamente.
-
-OpenRouter é o serviço/gateway pelo qual o projeto acessa um modelo configurado.
-
----
-
-## "LangSmith é obrigatório?"
-
-Não.
-
-A aplicação pode funcionar com:
-
-```properties
-LANGSMITH_TRACING=false
-```
-
-LangSmith serve para observabilidade.
-
----
-
-## "O State é um banco de dados?"
-
-Não.
-
-Ele é o contexto da execução do grafo.
-
-Persistência de domínio e State do workflow são conceitos diferentes.
-
----
-
-# 37. Relação com as aulas do Módulo 03
-
-| Aula | O que aprender | Implementação Java |
+| Aula | Conceitos | Onde estão no Java |
 |---|---|---|
-| 03-01 | intenção, State, Nodes, Edges | `graph/` |
-| 03-02 | JSON prompts, Structured Output, OpenRouter | `ai/`, `prompt/`, `schema/` |
-| 03-03 | texto → JSON → State → routing | `IdentifyPatientAppointmentIntentNode` |
-| 03-04 | actions, validação, E2E, Studio e tracing | `node/`, `service/`, `observability/` |
+| Módulo 03-01 | intent, State, Nodes, Edges | `graph/` |
+| Módulo 03-02 | JSON Prompt, Structured Output, OpenRouter | `ai/`, `prompt/`, `schema/` |
+| Módulo 03-03 | texto → JSON → State → routing | `IdentifyPatientAppointmentIntentNode` |
+| Módulo 03-04 | actions, validação, E2E, Studio, trace | `node/`, `service/`, `observability/` |
 
-Para comparação detalhada entre o original JavaScript e a migração:
+Documentação detalhada da migração:
 
 ```text
 docs/ANALISE_MIGRACAO.md
 ```
 
-Para detalhes da validação técnica:
+Validação técnica da entrega:
 
 ```text
 docs/VALIDACAO_FINAL.md
@@ -2475,32 +2032,50 @@ docs/VALIDACAO_FINAL.md
 
 ---
 
-# 38. Limitações desta POC
+# 23. Decisões de projeto
 
-O projeto não possui:
+## Por que repository em memória?
 
-- autenticação;
-- autorização;
-- PostgreSQL;
-- transações distribuídas;
-- controle completo de timezone;
-- prontuário;
-- conformidade LGPD para produção;
-- confirmação humana antes de ação destrutiva;
-- memória persistente de conversa;
-- retry/circuit breaker de produção.
+Para reduzir conceitos simultâneos.
 
-Isso é proposital.
+O foco é IA + workflow.
 
-A POC deve ensinar primeiro:
+---
+
+## Por que interfaces para IA?
+
+Para permitir testes sem dependência externa.
 
 ```text
-IA + Structured Output + workflow + regra Java
+PatientRequestInterpreter
+PatientResponseGenerator
 ```
 
 ---
 
-# 39. Segurança e privacidade
+## Por que LangGraph4j se um `if/else` resolveria?
+
+Porque o objetivo é estudar um padrão que consiga evoluir para fluxos maiores.
+
+---
+
+## Por que não deixar a IA executar o Service?
+
+Porque ações de negócio precisam ser previsíveis, testáveis e auditáveis.
+
+---
+
+## Por que duas chamadas ao modelo?
+
+Uma é especializada em **entender**.
+
+A outra é especializada em **comunicar o resultado**.
+
+Separar responsabilidades torna o fluxo mais fácil de testar e evoluir.
+
+---
+
+# 24. Segurança e privacidade
 
 Nunca versione:
 
@@ -2515,22 +2090,21 @@ OPENROUTER_API_KEY
 LANGSMITH_API_KEY
 ```
 
-Com tracing habilitado, prompts, respostas ou State podem ser observados dependendo da configuração.
+Com tracing habilitado, dados do State, prompts ou respostas podem ser registrados dependendo da configuração.
 
 Por isso:
 
-> **não utilize informações médicas reais neste projeto.**
+> **não utilize dados médicos reais nesta POC.**
 
 ---
 
-# 40. Checklist final de aprendizado
+# 25. Checklist de aprendizado
 
 Antes de considerar o estudo concluído, tente explicar sem consultar:
 
 ```text
-[ ] o problema resolvido pela IA
-[ ] o que a LLM faz
-[ ] o que a LLM não faz
+[ ] LLM
+[ ] Prompt
 [ ] SystemMessage
 [ ] UserMessage
 [ ] Structured Output
@@ -2542,43 +2116,43 @@ Antes de considerar o estudo concluído, tente explicar sem consultar:
 [ ] Edge
 [ ] Conditional Edge
 [ ] LangGraph4j
-[ ] regra no Service
-[ ] validação secundária
+[ ] Service
+[ ] segunda validação
+[ ] fallback
 [ ] Studio
 [ ] LangSmith
 [ ] OpenTelemetry
 [ ] como criar outra POC
 ```
 
-Se algum item ainda estiver confuso, volte apenas à seção correspondente.
-
 ---
 
-# 41. Resumo em 30 segundos
+# 26. Resumo em 30 segundos
 
 ```text
 1. Spring recebe uma frase.
-2. LangChain4j envia a frase ao modelo via OpenRouter.
-3. A LLM devolve Structured Output.
+2. LangChain4j envia essa frase ao modelo via OpenRouter.
+3. O modelo devolve Structured Output.
 4. Os dados entram no State.
-5. LangGraph4j escolhe o fluxo.
-6. Java agenda ou cancela.
-7. O resultado volta ao State.
-8. A LLM gera uma mensagem amigável.
-9. LangSmith pode registrar o trace.
+5. LangGraph4j escolhe o próximo Node.
+6. Java executa a regra de negócio.
+7. O resultado volta para o State.
+8. A IA gera uma mensagem amigável.
+9. Spring devolve a resposta.
+10. LangSmith pode registrar o trace.
 ```
 
-A lição central:
+A principal lição:
 
-> **Use IA onde existe ambiguidade de linguagem. Use Java onde precisa existir controle de negócio.**
+> **Use IA onde existe ambiguidade de linguagem. Use Java onde precisa existir controle determinístico.**
 
 ---
 
 # Referências oficiais
 
 - LangChain4j — https://docs.langchain4j.dev/
-- LangChain4j Structured Outputs — https://docs.langchain4j.dev/tutorials/structured-outputs/
-- LangGraph4j — https://github.com/langgraph4j/langgraph4j
+- Structured Outputs — https://docs.langchain4j.dev/tutorials/structured-outputs/
+- LangGraph4j — https://langgraph4j.github.io/langgraph4j/
 - OpenRouter — https://openrouter.ai/docs
 - OpenRouter Structured Outputs — https://openrouter.ai/docs/guides/features/structured-outputs
 - LangSmith — https://docs.langchain.com/langsmith/
